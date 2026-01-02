@@ -138,6 +138,11 @@ class JobRunList(BaseModel):
     items: list[JobRun]
 
 
+class JobList(BaseModel):
+    total: int
+    items: list[JobInfo]
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
@@ -211,6 +216,32 @@ async def get_job(job_id: str) -> JobInfo:
         next_run_time=job.next_run_time,
         status=status,
     )
+
+
+@app.get("/jobs", response_model=JobList)
+async def list_jobs() -> JobList:
+    jobs = scheduler.get_jobs()
+    items: list[JobInfo] = []
+    for job in jobs:
+        url = job.kwargs.get("url")
+        cron = job.kwargs.get("_cron")
+        method = job.kwargs.get("method", "GET")
+        headers = job.kwargs.get("headers")
+        body = job.kwargs.get("body")
+        status = "paused" if job.next_run_time is None else "scheduled"
+        items.append(
+            JobInfo(
+                id=job.id,
+                cron=cron,
+                url=url,
+                method=method,
+                headers=headers,
+                body=body,
+                next_run_time=job.next_run_time,
+                status=status,
+            )
+        )
+    return JobList(total=len(items), items=items)
 
 
 @app.delete("/jobs/{job_id}", response_model=JobResult)

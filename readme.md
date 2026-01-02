@@ -23,7 +23,7 @@
 
 - Python 3.10+
 - MongoDB 4.4+
-- Docker / Docker Compose（部署用）
+- Docker（部署用）
 
 ## 快速开始
 
@@ -64,7 +64,6 @@ docker run -d \
   --restart always \
   --env-file .env \
   --name weizhi-crontask \
-  --network rqk-net \
   weizhi-crontask:latest
 ```
 
@@ -142,14 +141,39 @@ docker run -d \
 
 ```json
 {
-  "id": "job-demo-001",
-  "cron": "*/5 * * * *",
-  "url": "http://example.internal/api/ping",
+  "id": "job-ping-001",
+  "cron": "*/10 * * * * *",
+  "url": "http://127.0.0.1:8000",
   "method": "GET",
   "headers": null,
   "body": null,
-  "next_run_time": "2024-01-01T12:00:00+08:00",
+  "next_run_time": "2024-01-01T12:00:10+08:00",
   "status": "scheduled"
+}
+```
+
+### 查询所有任务
+
+`GET /jobs`
+
+```json
+{
+  "total": 2,
+  "items": [
+    {
+      "id": "job-ping-001",
+      "cron": "*/10 * * * * *",
+      "url": "http://127.0.0.1:8000",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Trace-Id": "demo-001"
+      },
+      "body": "{\"ping\":\"hello\"}",
+      "next_run_time": "2024-01-01T12:00:10+08:00",
+      "status": "scheduled"
+    }
+  ]
 }
 ```
 
@@ -164,9 +188,9 @@ docker run -d \
   "offset": 0,
   "items": [
     {
-      "job_id": "job-demo-001",
-      "url": "http://example.internal/api/ping",
-      "cron": "*/5 * * * *",
+      "job_id": "job-ping-001",
+      "url": "http://127.0.0.1:8000",
+      "cron": "*/10 * * * * *",
       "method": "GET",
       "status_code": 200,
       "ok": true,
@@ -194,7 +218,7 @@ docker run -d \
 下面是一个创建任务并触发的示例流程：
 
 ```bash
-# 创建任务：每 5 分钟请求一次
+# 创建任务：每 10 秒请求一次
 curl -X POST http://localhost:8800/jobs \
   -H 'Content-Type: application/json' \
   -d '{
@@ -213,8 +237,6 @@ curl -X POST http://localhost:8800/jobs \
 curl -X DELETE http://localhost:8800/jobs/job-ping-001
 ```
 
-你也可以在项目中实现一个 `GET /demo/target` 接口，方便展示调度效果。
-
 ## 任务唯一性
 
 - 任务 ID 由调用方传入，必须全局唯一
@@ -230,7 +252,7 @@ curl -X DELETE http://localhost:8800/jobs/job-ping-001
 
 环境变量（可选）：
 
-- `MONGO_URI`：MongoDB 连接串，默认 `mongodb://mongo:27017`
+- `MONGO_URI`：MongoDB 连接串，默认 `mongodb://localhost:27017`
 - `MONGO_DB`：数据库名，默认 `weizhi_crontask`
 - `JOBSTORE_COLLECTION`：任务集合名，默认 `apscheduler_jobs`
 - `RUNS_COLLECTION`：执行记录集合名，默认 `job_runs`
