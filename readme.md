@@ -110,6 +110,32 @@ docker run -d \
 }
 ```
 
+### 暂停任务
+
+`POST /jobs/{id}/pause`
+
+返回：
+
+```json
+{
+  "id": "job-ping-001",
+  "status": "paused"
+}
+```
+
+### 恢复任务
+
+`POST /jobs/{id}/resume`
+
+返回：
+
+```json
+{
+  "id": "job-ping-001",
+  "status": "scheduled"
+}
+```
+
 ### 查询任务
 
 `GET /jobs/{id}`

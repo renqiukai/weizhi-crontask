@@ -3,7 +3,7 @@ set -euo pipefail
 
 export ENV=development
 
-if [ -f ".env" ]; then
+if [ -f ".env.dev" ]; then
   set -a
   . ./.env.dev
   set +a

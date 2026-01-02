@@ -200,6 +200,7 @@ async def get_job(job_id: str) -> JobInfo:
     method = job.kwargs.get("method", "GET")
     headers = job.kwargs.get("headers")
     body = job.kwargs.get("body")
+    status = "paused" if job.next_run_time is None else "scheduled"
     return JobInfo(
         id=job.id,
         cron=cron,
@@ -208,7 +209,7 @@ async def get_job(job_id: str) -> JobInfo:
         headers=headers,
         body=body,
         next_run_time=job.next_run_time,
-        status="scheduled",
+        status=status,
     )
 
 
@@ -219,6 +220,24 @@ async def delete_job(job_id: str) -> JobResult:
         raise HTTPException(status_code=404, detail="job not found")
     scheduler.remove_job(job_id)
     return JobResult(id=job_id, status="deleted")
+
+
+@app.post("/jobs/{job_id}/pause", response_model=JobResult)
+async def pause_job(job_id: str) -> JobResult:
+    job = scheduler.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    scheduler.pause_job(job_id)
+    return JobResult(id=job_id, status="paused")
+
+
+@app.post("/jobs/{job_id}/resume", response_model=JobResult)
+async def resume_job(job_id: str) -> JobResult:
+    job = scheduler.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    scheduler.resume_job(job_id)
+    return JobResult(id=job_id, status="scheduled")
 
 
 @app.get("/jobs/{job_id}/runs", response_model=JobRunList)
@@ -232,10 +251,7 @@ async def list_job_runs(job_id: str, limit: int = 20, offset: int = 0) -> JobRun
     def _fetch() -> tuple[int, list[dict]]:
         total = runs_collection.count_documents(query)
         cursor = (
-            runs_collection.find(query)
-            .sort("run_at", -1)
-            .skip(offset)
-            .limit(limit)
+            runs_collection.find(query).sort("run_at", -1).skip(offset).limit(limit)
         )
         items = []
         for doc in cursor:
@@ -245,8 +261,3 @@ async def list_job_runs(job_id: str, limit: int = 20, offset: int = 0) -> JobRun
 
     total, items = await asyncio.to_thread(_fetch)
     return JobRunList(total=total, limit=limit, offset=offset, items=items)
-
-
-@app.get("/demo/target")
-async def demo_target() -> dict:
-    return {"status": "hit", "ts": datetime.utcnow().isoformat()}
