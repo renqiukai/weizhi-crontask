@@ -208,7 +208,3 @@ Dockerfile
 docker-compose.yml
 requirements.txt
 ```
-
-## 需求
-
-- 请求的 url 的时候有没有区分 get post 等方法
