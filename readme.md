@@ -41,11 +41,31 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8800
 ```
 
-### 2. Docker 部署
+### 2. Docker 部署（不依赖 Compose）
+
+构建镜像：
+
+```bash
+docker build -t weizhi-crontask:latest .
+```
+
+准备环境变量文件（不提交）：
 
 ```bash
 cp .env.example .env
-docker compose up -d --build
+# 编辑 .env，填写你的 MONGO_URI 等
+```
+
+运行容器：
+
+```bash
+docker run -d \
+  -p 8800:8800 \
+  --restart always \
+  --env-file .env \
+  --name weizhi-crontask \
+  --network rqk-net \
+  weizhi-crontask:latest
 ```
 
 ## API 设计（当前实现）
@@ -205,6 +225,5 @@ curl -X DELETE http://localhost:8800/jobs/job-ping-001
 app/
   main.py
 Dockerfile
-docker-compose.yml
 requirements.txt
 ```
