@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+apscheduler
+pymongo
+httpx
+loguru

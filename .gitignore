@@ -1,0 +1,17 @@
+.env
+.venv
+.python-version
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+dist/
+build/
+.idea/
+.vscode/
+.env.dev
