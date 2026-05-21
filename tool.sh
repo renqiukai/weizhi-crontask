@@ -1,10 +1,10 @@
-docker build -t weizhi-crontask:latest .
-docker rm -f weizhi-crontask
-docker run -d \
-  -p 8800:8800 \
-  --restart always \
-  --env-file .env \
-  --name weizhi-crontask \
-  --network rqk-net \
-  weizhi-crontask:latest
-docker logs -f weizhi-crontask
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ ! -f ".env" ]; then
+  cp .env.example .env
+  echo "created .env from .env.example"
+fi
+
+docker compose up -d --build
+docker compose logs -f app

@@ -41,30 +41,40 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8800
 ```
 
-### 2. Docker 部署（不依赖 Compose）
+### 2. Docker 启动（推荐）
 
-构建镜像：
+项目已提供 `docker-compose.yml`，会同时启动：
+- `app`（FastAPI 服务，端口 `8800`）
+- `mongo`（任务持久化存储，数据卷 `mongo_data`）
 
-```bash
-docker build -t weizhi-crontask:latest .
-```
-
-准备环境变量文件（不提交）：
+准备环境变量文件（首次）：
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填写你的 MONGO_URI 等
 ```
 
-运行容器：
+启动：
 
 ```bash
-docker run -d \
-  -p 8800:8800 \
-  --restart always \
-  --env-file .env \
-  --name weizhi-crontask \
-  weizhi-crontask:latest
+docker compose up -d --build
+```
+
+查看日志：
+
+```bash
+docker compose logs -f app
+```
+
+停止并保留数据：
+
+```bash
+docker compose down
+```
+
+停止并删除数据卷：
+
+```bash
+docker compose down -v
 ```
 
 ## API 设计（当前实现）
@@ -83,7 +93,8 @@ docker run -d \
     "Content-Type": "application/json",
     "X-Trace-Id": "demo-001"
   },
-  "body": "{\"ping\":\"hello\"}"
+  "body": "{\"ping\":\"hello\"}",
+  "remark": "每10秒ping一次"
 }
 ```
 
@@ -122,6 +133,21 @@ docker run -d \
 }
 ```
 
+### 修改任务
+
+`PATCH /jobs/{id}`
+
+所有字段均可选，只传需要修改的字段：
+
+```json
+{
+  "cron": "0 * * * *",
+  "remark": "改为每小时执行"
+}
+```
+
+返回更新后的任务完整信息（同查询任务）。
+
 ### 恢复任务
 
 `POST /jobs/{id}/resume`
@@ -147,6 +173,7 @@ docker run -d \
   "method": "GET",
   "headers": null,
   "body": null,
+  "remark": "每10秒ping一次",
   "next_run_time": "2024-01-01T12:00:10+08:00",
   "status": "scheduled"
 }
@@ -252,7 +279,7 @@ curl -X DELETE http://localhost:8800/jobs/job-ping-001
 
 环境变量（可选）：
 
-- `MONGO_URI`：MongoDB 连接串，默认 `mongodb://localhost:27017`
+- `MONGO_URI`：MongoDB 连接串，默认 `mongodb://mongo:27017`
 - `MONGO_DB`：数据库名，默认 `weizhi_crontask`
 - `JOBSTORE_COLLECTION`：任务集合名，默认 `apscheduler_jobs`
 - `RUNS_COLLECTION`：执行记录集合名，默认 `job_runs`

@@ -100,6 +100,16 @@ class JobCreate(BaseModel):
     method: str = "GET"
     headers: dict[str, str] | None = None
     body: str | None = None
+    remark: str | None = None
+
+
+class JobPatch(BaseModel):
+    cron: str | None = None
+    url: AnyHttpUrl | None = None
+    method: str | None = None
+    headers: dict[str, str] | None = None
+    body: str | None = None
+    remark: str | None = None
 
 
 class JobInfo(BaseModel):
@@ -109,6 +119,7 @@ class JobInfo(BaseModel):
     method: str
     headers: dict[str, str] | None
     body: str | None
+    remark: str | None
     next_run_time: datetime | None
     status: str
 
@@ -187,6 +198,7 @@ async def create_job(payload: JobCreate) -> JobResult:
             "_cron": payload.cron,
             "headers": payload.headers,
             "body": payload.body,
+            "_remark": payload.remark,
         },
         coalesce=True,
         max_instances=1,
@@ -195,52 +207,33 @@ async def create_job(payload: JobCreate) -> JobResult:
     return JobResult(id=payload.id, status="scheduled")
 
 
-@app.get("/jobs/{job_id}", response_model=JobInfo)
-async def get_job(job_id: str) -> JobInfo:
-    job = scheduler.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="job not found")
-    url = job.kwargs.get("url")
-    cron = job.kwargs.get("_cron")
-    method = job.kwargs.get("method", "GET")
-    headers = job.kwargs.get("headers")
-    body = job.kwargs.get("body")
+def _job_to_info(job) -> JobInfo:
     status = "paused" if job.next_run_time is None else "scheduled"
     return JobInfo(
         id=job.id,
-        cron=cron,
-        url=url,
-        method=method,
-        headers=headers,
-        body=body,
+        cron=job.kwargs.get("_cron"),
+        url=job.kwargs.get("url"),
+        method=job.kwargs.get("method", "GET"),
+        headers=job.kwargs.get("headers"),
+        body=job.kwargs.get("body"),
+        remark=job.kwargs.get("_remark"),
         next_run_time=job.next_run_time,
         status=status,
     )
 
 
+@app.get("/jobs/{job_id}", response_model=JobInfo)
+async def get_job(job_id: str) -> JobInfo:
+    job = scheduler.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return _job_to_info(job)
+
+
 @app.get("/jobs", response_model=JobList)
 async def list_jobs() -> JobList:
     jobs = scheduler.get_jobs()
-    items: list[JobInfo] = []
-    for job in jobs:
-        url = job.kwargs.get("url")
-        cron = job.kwargs.get("_cron")
-        method = job.kwargs.get("method", "GET")
-        headers = job.kwargs.get("headers")
-        body = job.kwargs.get("body")
-        status = "paused" if job.next_run_time is None else "scheduled"
-        items.append(
-            JobInfo(
-                id=job.id,
-                cron=cron,
-                url=url,
-                method=method,
-                headers=headers,
-                body=body,
-                next_run_time=job.next_run_time,
-                status=status,
-            )
-        )
+    items = [_job_to_info(job) for job in jobs]
     return JobList(total=len(items), items=items)
 
 
@@ -251,6 +244,63 @@ async def delete_job(job_id: str) -> JobResult:
         raise HTTPException(status_code=404, detail="job not found")
     scheduler.remove_job(job_id)
     return JobResult(id=job_id, status="deleted")
+
+
+@app.patch("/jobs/{job_id}", response_model=JobInfo)
+async def patch_job(job_id: str, payload: JobPatch) -> JobInfo:
+    job = scheduler.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    new_kwargs = dict(job.kwargs)
+    update_trigger = False
+
+    if payload.url is not None:
+        new_kwargs["url"] = str(payload.url)
+    if payload.method is not None:
+        method = payload.method.upper()
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
+            raise HTTPException(
+                status_code=400, detail="method must be GET/POST/PUT/PATCH/DELETE"
+            )
+        new_kwargs["method"] = method
+    if payload.headers is not None:
+        new_kwargs["headers"] = payload.headers
+    if payload.body is not None:
+        new_kwargs["body"] = payload.body
+    if payload.remark is not None:
+        new_kwargs["_remark"] = payload.remark
+    if payload.cron is not None:
+        update_trigger = True
+        new_cron = payload.cron
+        new_kwargs["_cron"] = new_cron
+
+    if update_trigger:
+        try:
+            cron_parts = new_cron.split()
+            if len(cron_parts) == 5:
+                trigger = CronTrigger.from_crontab(new_cron, timezone=SCHEDULER_TZINFO)
+            elif len(cron_parts) == 6:
+                second, minute, hour, day, month, day_of_week = cron_parts
+                trigger = CronTrigger(
+                    second=second,
+                    minute=minute,
+                    hour=hour,
+                    day=day,
+                    month=month,
+                    day_of_week=day_of_week,
+                    timezone=SCHEDULER_TZINFO,
+                )
+            else:
+                raise ValueError("cron must have 5 or 6 fields")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        scheduler.modify_job(job_id, kwargs=new_kwargs)
+        scheduler.reschedule_job(job_id, trigger=trigger)
+    else:
+        scheduler.modify_job(job_id, kwargs=new_kwargs)
+
+    return _job_to_info(scheduler.get_job(job_id))
 
 
 @app.post("/jobs/{job_id}/pause", response_model=JobResult)
