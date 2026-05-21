@@ -59,6 +59,7 @@ async def call_url_job(
     _cron: str | None = None,
     headers: dict[str, str] | None = None,
     body: str | None = None,
+    _remark: str | None = None,
 ) -> None:
     run_at = datetime.now(tz=timezone.utc)
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
