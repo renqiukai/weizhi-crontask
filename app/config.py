@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 from loguru import logger
 
@@ -17,10 +18,21 @@ SCHEDULER_TZINFO = ZoneInfo(SCHEDULER_TZ)
 REQUEST_TIMEOUT = float(_get_env("REQUEST_TIMEOUT", "10"))
 
 
+def _redact_uri(uri: str) -> str:
+    parts = urlsplit(uri)
+    if not parts.password:
+        return uri
+    username = parts.username or ""
+    host = parts.hostname or ""
+    port = f":{parts.port}" if parts.port else ""
+    redacted_netloc = f"{username}:***@{host}{port}"
+    return urlunsplit((parts.scheme, redacted_netloc, parts.path, parts.query, parts.fragment))
+
+
 logger.info(
     {
         "msg": "Configuration loaded",
-        "MONGO_URI": MONGO_URI,
+        "MONGO_URI": _redact_uri(MONGO_URI),
         "MONGO_DB": MONGO_DB,
         "JOBSTORE_COLLECTION": JOBSTORE_COLLECTION,
         "RUNS_COLLECTION": RUNS_COLLECTION,
