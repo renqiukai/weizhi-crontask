@@ -43,9 +43,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8800
 
 ### 2. Docker 启动（推荐）
 
-项目已提供 `docker-compose.yml`，会同时启动：
-- `app`（FastAPI 服务，端口 `8800`）
-- `mongo`（任务持久化存储，数据卷 `mongo_data`）
+项目使用 `docker run` 启动 FastAPI 服务，MongoDB 需要提前提供并在 `.env` 中配置。
 
 准备环境变量文件（首次）：
 
@@ -56,25 +54,32 @@ cp .env.example .env
 启动：
 
 ```bash
-docker compose up -d --build
+./deploy.sh
+```
+
+`deploy.sh` 默认通过 SSH 连接 `tcloud`，进入 `/home/weizhi-cron` 执行
+`git pull --ff-only`，然后按 Docker 方式构建、重启并检查 `/health`。如需覆盖目标：
+
+```bash
+REMOTE_HOST=other-host REMOTE_DIR=/path/to/weizhi-cron ./deploy.sh
 ```
 
 查看日志：
 
 ```bash
-docker compose logs -f app
+docker logs -f weizhi-crontask
 ```
 
-停止并保留数据：
+也可以只执行构建和启动，不等待健康检查：
 
 ```bash
-docker compose down
+./tool.sh
 ```
 
-停止并删除数据卷：
+停止服务：
 
 ```bash
-docker compose down -v
+docker rm -f weizhi-crontask
 ```
 
 ## API 设计（当前实现）
@@ -94,7 +99,8 @@ docker compose down -v
     "X-Trace-Id": "demo-001"
   },
   "body": "{\"ping\":\"hello\"}",
-  "remark": "每10秒ping一次"
+  "remark": "每10秒ping一次",
+  "await_callback": false
 }
 ```
 
@@ -110,6 +116,22 @@ docker compose down -v
 ### 删除任务
 
 `DELETE /jobs/{id}`
+
+### 等待业务完成回调
+
+将任务的 `await_callback` 设置为 `true` 后，目标接口返回 2xx 只会将本次执行标记为 `waiting_callback`。请求头会收到 `X-Task-Run-Id` 和 `X-Task-Callback-Url`，业务真正完成后调用：
+
+`POST /runs/{run_id}/complete`
+
+```json
+{
+  "status": "success",
+  "message": "处理完成",
+  "result": {"success_count": 100, "failed_count": 2}
+}
+```
+
+失败时将 `status` 设为 `failed`。回调地址由 `CALLBACK_BASE_URL` 与 `run_id` 拼接，生产环境请配置为业务容器可访问的调度服务地址。
 
 返回：
 

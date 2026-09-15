@@ -1,6 +1,8 @@
 import asyncio
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from typing import Any
 
 import httpx
 from apscheduler.jobstores.mongodb import MongoDBJobStore
@@ -18,6 +20,7 @@ from app.config import (
     REQUEST_TIMEOUT,
     RUNS_COLLECTION,
     SCHEDULER_TZINFO,
+    CALLBACK_BASE_URL,
 )
 
 
@@ -52,6 +55,19 @@ async def _insert_run_record(record: dict) -> None:
     await asyncio.to_thread(runs_collection.insert_one, record)
 
 
+async def _update_run_record(
+    run_id: str, values: dict, statuses: list[str] | None = None
+) -> None:
+    query = {"run_id": run_id}
+    if statuses:
+        query["status"] = {"$in": statuses}
+    await asyncio.to_thread(
+        runs_collection.update_one,
+        query,
+        {"$set": values},
+    )
+
+
 async def call_url_job(
     url: str,
     method: str = "GET",
@@ -60,38 +76,67 @@ async def call_url_job(
     headers: dict[str, str] | None = None,
     body: str | None = None,
     _remark: str | None = None,
+    _await_callback: bool = False,
 ) -> None:
+    run_id = uuid.uuid4().hex
     run_at = datetime.now(tz=timezone.utc)
+    await_callback = bool(_await_callback)
+    await _insert_run_record(
+        {
+            "job_id": job_id or "unknown",
+            "run_id": run_id,
+            "url": url,
+            "cron": _cron,
+            "method": method,
+            "status": "running",
+            "status_code": None,
+            "ok": None,
+            "response_text": None,
+            "elapsed_ms": None,
+            "error": None,
+            "run_at": run_at,
+            "completed_at": None,
+        }
+    )
+    request_headers = dict(headers or {})
+    if await_callback:
+        callback_url = f"{CALLBACK_BASE_URL.rstrip('/')}/runs/{run_id}/complete"
+        request_headers.update(
+            {
+                "X-Task-Run-Id": run_id,
+                "X-Task-Callback-Url": callback_url,
+            }
+        )
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         try:
-            response = await client.request(method, url, headers=headers, content=body)
+            response = await client.request(
+                method, url, headers=request_headers, content=body
+            )
+            completed_at = datetime.now(tz=timezone.utc)
+            waiting_callback = await_callback and response.status_code < 400
             record = {
-                "job_id": job_id or "unknown",
-                "url": url,
-                "cron": _cron,
-                "method": method,
+                "status": "waiting_callback" if waiting_callback else (
+                    "success" if response.status_code < 400 else "failed"
+                ),
                 "status_code": response.status_code,
                 "ok": response.status_code < 400,
                 "response_text": response.text,
                 "elapsed_ms": response.elapsed.total_seconds() * 1000,
                 "error": None,
-                "run_at": run_at,
+                "completed_at": None if waiting_callback else completed_at,
             }
         except Exception as exc:  # pragma: no cover - best effort logging
             logger.warning("job call failed url={} err={}", url, exc)
             record = {
-                "job_id": job_id or "unknown",
-                "url": url,
-                "cron": _cron,
-                "method": method,
+                "status": "failed",
                 "status_code": None,
                 "ok": False,
                 "response_text": None,
                 "elapsed_ms": None,
                 "error": str(exc),
-                "run_at": run_at,
+                "completed_at": datetime.now(tz=timezone.utc),
             }
-    await _insert_run_record(record)
+    await _update_run_record(run_id, record, statuses=["running"])
 
 
 class JobCreate(BaseModel):
@@ -102,6 +147,7 @@ class JobCreate(BaseModel):
     headers: dict[str, str] | None = None
     body: str | None = None
     remark: str | None = None
+    await_callback: bool = False
 
 
 class JobPatch(BaseModel):
@@ -111,6 +157,7 @@ class JobPatch(BaseModel):
     headers: dict[str, str] | None = None
     body: str | None = None
     remark: str | None = None
+    await_callback: bool | None = None
 
 
 class JobInfo(BaseModel):
@@ -123,6 +170,7 @@ class JobInfo(BaseModel):
     remark: str | None
     next_run_time: datetime | None
     status: str
+    await_callback: bool = False
 
 
 class JobResult(BaseModel):
@@ -136,11 +184,16 @@ class JobRun(BaseModel):
     cron: str | None
     method: str
     status_code: int | None
-    ok: bool
+    ok: bool | None
     response_text: str | None
     elapsed_ms: float | None
     error: str | None
     run_at: datetime
+    run_id: str = ""
+    status: str = "success"
+    completed_at: datetime | None = None
+    callback_message: str | None = None
+    callback_result: Any = None
 
 
 class JobRunList(BaseModel):
@@ -148,6 +201,12 @@ class JobRunList(BaseModel):
     limit: int
     offset: int
     items: list[JobRun]
+
+
+class RunComplete(BaseModel):
+    status: str
+    message: str | None = None
+    result: Any = None
 
 
 class JobList(BaseModel):
@@ -200,6 +259,7 @@ async def create_job(payload: JobCreate) -> JobResult:
             "headers": payload.headers,
             "body": payload.body,
             "_remark": payload.remark,
+            "_await_callback": payload.await_callback,
         },
         coalesce=True,
         max_instances=1,
@@ -220,6 +280,7 @@ def _job_to_info(job) -> JobInfo:
         remark=job.kwargs.get("_remark"),
         next_run_time=job.next_run_time,
         status=status,
+        await_callback=job.kwargs.get("_await_callback", False),
     )
 
 
@@ -271,6 +332,8 @@ async def patch_job(job_id: str, payload: JobPatch) -> JobInfo:
         new_kwargs["body"] = payload.body
     if payload.remark is not None:
         new_kwargs["_remark"] = payload.remark
+    if payload.await_callback is not None:
+        new_kwargs["_await_callback"] = payload.await_callback
     if payload.cron is not None:
         update_trigger = True
         new_cron = payload.cron
@@ -320,6 +383,37 @@ async def resume_job(job_id: str) -> JobResult:
         raise HTTPException(status_code=404, detail="job not found")
     scheduler.resume_job(job_id)
     return JobResult(id=job_id, status="scheduled")
+
+
+@app.post("/runs/{run_id}/complete")
+async def complete_run(run_id: str, payload: RunComplete) -> dict:
+    if payload.status not in {"success", "failed"}:
+        raise HTTPException(
+            status_code=400, detail="status must be success or failed"
+        )
+
+    current = await asyncio.to_thread(
+        runs_collection.find_one, {"run_id": run_id}, {"_id": 0}
+    )
+    if not current:
+        raise HTTPException(status_code=404, detail="run not found")
+    if current.get("status") in {"success", "failed"}:
+        return {"run_id": run_id, "status": current["status"]}
+
+    completed_at = datetime.now(tz=timezone.utc)
+    await _update_run_record(
+        run_id,
+        {
+            "status": payload.status,
+            "ok": payload.status == "success",
+            "completed_at": completed_at,
+            "callback_message": payload.message,
+            "callback_result": payload.result,
+            "error": payload.message if payload.status == "failed" else None,
+        },
+        statuses=["running", "waiting_callback"],
+    )
+    return {"run_id": run_id, "status": payload.status}
 
 
 @app.get("/jobs/{job_id}/runs", response_model=JobRunList)

@@ -16,6 +16,7 @@ RUNS_COLLECTION = _get_env("RUNS_COLLECTION", "job_runs")
 SCHEDULER_TZ = _get_env("SCHEDULER_TZ", "Asia/Shanghai")
 SCHEDULER_TZINFO = ZoneInfo(SCHEDULER_TZ)
 REQUEST_TIMEOUT = float(_get_env("REQUEST_TIMEOUT", "10"))
+CALLBACK_BASE_URL = _get_env("CALLBACK_BASE_URL", "http://weizhi-crontask:8800")
 
 
 def _redact_uri(uri: str) -> str:
@@ -38,5 +39,6 @@ logger.info(
         "RUNS_COLLECTION": RUNS_COLLECTION,
         "SCHEDULER_TZ": SCHEDULER_TZ,
         "REQUEST_TIMEOUT": REQUEST_TIMEOUT,
+        "CALLBACK_BASE_URL": CALLBACK_BASE_URL,
     }
 )
