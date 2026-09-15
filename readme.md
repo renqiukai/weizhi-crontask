@@ -57,7 +57,7 @@ cp .env.example .env
 ./deploy.sh
 ```
 
-`deploy.sh` 默认通过 SSH 连接 `tcloud`，进入 `/home/weizhi-cron` 执行
+`deploy.sh` 默认通过 SSH 连接 `tcloud`，进入 `/home/weizhi-crontask` 执行
 `git pull --ff-only`，然后按 Docker 方式构建、重启并检查 `/health`。如需覆盖目标：
 
 ```bash

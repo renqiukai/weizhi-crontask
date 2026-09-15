@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REMOTE_HOST="${REMOTE_HOST:-tcloud}"
-REMOTE_DIR="${REMOTE_DIR:-/home/weizhi-cron}"
+REMOTE_DIR="${REMOTE_DIR:-/home/weizhi-crontask}"
 
 echo "deploying weizhi-crontask to ${REMOTE_HOST}:${REMOTE_DIR}"
 
